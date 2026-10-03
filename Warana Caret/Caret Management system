@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Warana Dairy Crate Management</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f7f5;color:#1f2937}
+button,input,select{font:inherit}button{cursor:pointer;border:0;border-radius:10px;padding:11px 16px}
+.login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#e8f5e9,#f8faf9)}
+.card{background:white;border-radius:18px;box-shadow:0 8px 30px #00000012;padding:24px}.login-card{width:min(420px,100%);text-align:center}
+.logo{width:70px;height:70px;border-radius:18px;background:#2e7d32;color:#fff;display:grid;place-items:center;font-size:32px;margin:0 auto 12px}
+h1,h2,h3{margin-top:0}.muted{color:#6b7280}.field{margin:12px 0;text-align:left}.field label{display:block;font-size:13px;font-weight:bold;margin-bottom:6px}
+input,select{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;background:#fff}
+.primary{background:#2e7d32;color:white}.secondary{background:#e8f5e9;color:#256c2b}.danger{background:#fee2e2;color:#b91c1c}.gray{background:#eef2f7}
+.app{display:none;min-height:100vh}.top{height:64px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;padding:0 20px;position:sticky;top:0;z-index:5}
+.brand{font-weight:800;color:#2e7d32}.wrap{max-width:1250px;margin:auto;padding:20px}
+.nav{display:flex;gap:8px;overflow:auto;margin-bottom:18px}.nav button{background:#fff;color:#374151;white-space:nowrap}.nav button.active{background:#2e7d32;color:#fff}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.stat{padding:18px}.stat .num{font-size:28px;font-weight:800;margin-top:7px}
+.section{margin-top:18px}.table-wrap{overflow:auto;background:#fff;border-radius:14px}.table{width:100%;border-collapse:collapse;min-width:650px}.table th,.table td{padding:12px;border-bottom:1px solid #edf0f2;text-align:left}.table th{background:#f8faf8;font-size:13px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.pill{padding:5px 9px;border-radius:999px;background:#e8f5e9;color:#256c2b;font-size:12px;font-weight:bold}
+.modal-bg{display:none;position:fixed;inset:0;background:#0007;z-index:20;padding:20px;align-items:center;justify-content:center}.modal{width:min(520px,100%);max-height:90vh;overflow:auto}
+.empty{padding:30px;text-align:center;color:#6b7280}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.hidden{display:none!important}
+@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}.top{padding:0 12px}.wrap{padding:12px}.stat .num{font-size:22px}}
+@media(max-width:480px){.grid{grid-template-columns:1fr 1fr}.grid .card{padding:14px}.nav button{padding:9px 12px}.top .brand{font-size:14px}}
+</style>
+</head>
+<body>
+
+<div id="login" class="login">
+  <div class="card login-card">
+    <div class="logo">🥛</div>
+    <h1>Warana Dairy</h1>
+    <div class="muted">Crate Management System</div>
+    <div class="field"><label>Login as</label>
+      <select id="role"><option value="admin">Admin</option><option value="driver">Driver</option><option value="customer">Customer</option></select>
+    </div>
+    <div class="field"><label>Username / Mobile</label><input id="username" placeholder="Enter username"></div>
+    <div class="field"><label>Password</label><input id="password" type="password" placeholder="Enter password"></div>
+    <button class="primary" style="width:100%" onclick="login()">Login</button>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Demo: admin/admin, driver/driver, customer/customer</p>
+  </div>
+</div>
+
+<div id="app" class="app">
+  <div class="top"><div class="brand">🥛 Warana Dairy Crate Management</div><div class="actions"><span id="who" class="pill"></span><button class="gray" onclick="logout()">Logout</button></div></div>
+  <div class="wrap">
+    <div id="nav" class="nav"></div>
+    <div id="content"></div>
+  </div>
+</div>
+
+<div id="modalBg" class="modal-bg"><div class="card modal" id="modal"></div></div>
+
+<script>
+const KEY='warana_crate_v1';
+let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
+ vehicles:[{id:1,no:'MH12 AB 1234',transport:'Warana Transport',driver:'Ramesh',assigned:100},{id:2,no:'MH12 CD 5678',transport:'Warana Transport',driver:'Suresh',assigned:80}],
+ customers:[{id:1,name:'Anand Dairy',mobile:'9999999999'},{id:2,name:'ABC Hotel',mobile:'8888888888'},{id:3,name:'Karegaon Shop',mobile:'7777777777'}],
+ tx:[]
+};
+let session=null;
+function save(){localStorage.setItem(KEY,JSON.stringify(db))}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function login(){
+ const r=document.getElementById('role').value,u=document.getElementById('username').value.trim(),p=document.getElementById('password').value;
+ if((r==='admin'&&u==='admin'&&p==='admin')||(r==='driver'&&u==='driver'&&p==='driver')||(r==='customer'&&u==='customer'&&p==='customer')){
+   session={role:r, user:r==='driver'?db.vehicles[0]:r==='customer'?db.customers[0]:null}; document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';render();
+ }else alert('Demo login: admin/admin, driver/driver, customer/customer');
+}
+function logout(){session=null;document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex'}
+function setNav(items,active){document.getElementById('nav').innerHTML=items.map(x=>`<button class="${active===x[0]?'active':''}" onclick="page('${x[0]}')">${x[1]}</button>`).join('')}
+function render(){document.getElementById('who').textContent=session.role.toUpperCase();page(session.role==='admin'?'dashboard':session.role==='driver'?'driver':'customer')}
+function totalsVehicle(v){
+ let out=db.tx.filter(t=>t.vehicleId===v.id&&t.type==='out').reduce((a,t)=>a+t.qty,0);
+ let ret=db.tx.filter(t=>t.vehicleId===v.id&&t.type==='return').reduce((a,t)=>a+t.qty,0);
+ return {out,ret,current:v.assigned-out+ret};
+}
+function customerTotals(c,vehicleId=null){
+ let a=db.tx.filter(t=>t.customerId===c.id&&(!vehicleId||t.vehicleId===vehicleId));
+ let out=a.filter(t=>t.type==='out').reduce((x,t)=>x+t.qty,0),ret=a.filter(t=>t.type==='return').reduce((x,t)=>x+t.qty,0);
+ return {out,ret,pending:out-ret};
+}
+function page(p){
+ if(session.role==='admin') adminPage(p); else if(session.role==='driver') driverPage(p); else customerPage(p);
+}
+function adminPage(p){
+ setNav([['dashboard','📊 Dashboard'],['vehicles','🚚 Vehicles'],['customers','👥 Customers'],['history','📜 History']],p);
+ if(p==='dashboard') adminDashboard(); if(p==='vehicles') vehiclesPage(); if(p==='customers') customersPage(); if(p==='history') historyPage();
+}
+function adminDashboard(){
+ let total=db.vehicles.reduce((a,v)=>a+v.assigned,0),out=db.tx.filter(t=>t.type==='out').reduce((a,t)=>a+t.qty,0),ret=db.tx.filter(t=>t.type==='return').reduce((a,t)=>a+t.qty,0);
+ document.getElementById('content').innerHTML=`<h2>Admin Dashboard</h2><div class="grid">
+ <div class="card stat"><div class="muted">Total Crates Assigned</div><div class="num">${total}</div></div>
+ <div class="card stat"><div class="muted">Total Out</div><div class="num">${out}</div></div>
+ <div class="card stat"><div class="muted">Total Returned</div><div class="num">${ret}</div></div>
+ <div class="card stat"><div class="muted">Pending With Customers</div><div class="num">${out-ret}</div></div></div>
+ <div class="section card"><h3>Vehicle-wise Crates</h3>${vehicleTable()}</div>`;
+}
+function vehicleTable(){
+ return `<div class="table-wrap"><table class="table"><tr><th>Transport Name</th><th>Vehicle Number</th><th>Driver</th><th>Assigned</th><th>Out</th><th>Return</th><th>Current</th></tr>${db.vehicles.map(v=>{let x=totalsVehicle(v);return `<tr><td><b>${esc(v.transport||'Warana Transport')}</b></td><td>${esc(v.no)}</td><td>${esc(v.driver)}</td><td>${v.assigned}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.current}</b></td></tr>`}).join('')}</table></div>`;
+}
+function vehiclesPage(){
+ document.getElementById('content').innerHTML=`<div class="actions" style="justify-content:space-between"><h2>Vehicle Management</h2><button class="primary" onclick="vehicleModal()">+ Add Vehicle</button></div>
+ <div class="section card">${vehicleTable()}</div>`;
+}
+function vehicleModal(v=null){
+ openModal(`<h3>${v?'Edit':'Add'} Vehicle</h3>
+ <div class="field"><label>Transport Name</label><input id="mTransport" value="${esc(v?.transport||'Warana Transport')}" placeholder="Enter transport name"></div>
+ <div class="field"><label>Vehicle Number</label><input id="mNo" value="${esc(v?.no||'')}" placeholder="MH12 AB 1234"></div>
+ <div class="field"><label>Driver Name</label><input id="mDriver" value="${esc(v?.driver||'')}"></div>
+ <div class="field"><label>Total Assigned Crates</label><input id="mCrates" type="number" min="0" value="${v?.assigned||0}"></div>
+ <div class="actions"><button class="primary" onclick="saveVehicle(${v?.id||0})">Save</button><button class="gray" onclick="closeModal()">Cancel</button></div>`);
+}
+function saveVehicle(id){
+ let transport=document.getElementById('mTransport').value.trim(),no=document.getElementById('mNo').value.trim(),driver=document.getElementById('mDriver').value.trim(),assigned=+document.getElementById('mCrates').value||0;
+ if(!transport||!no||!driver)return alert('Enter transport name, vehicle number and driver name');
+ if(id){let v=db.vehicles.find(x=>x.id===id);Object.assign(v,{transport,no,driver,assigned})}
+ else db.vehicles.push({id:Date.now(),transport,no,driver,assigned});
+ save();closeModal();vehiclesPage();
+}
+function customersPage(){
+ document.getElementById('content').innerHTML=`<div class="actions" style="justify-content:space-between"><h2>Customer Management</h2><button class="primary" onclick="customerModal()">+ Add Customer</button></div>
+ <div class="section card"><div class="table-wrap"><table class="table"><tr><th>Customer</th><th>Mobile</th><th>Received</th><th>Returned</th><th>Pending</th><th>Action</th></tr>${db.customers.map(c=>{let x=customerTotals(c);return `<tr><td>${esc(c.name)}</td><td>${esc(c.mobile)}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.pending}</b></td><td><button class="secondary" onclick="customerDetails(${c.id})">View</button></td></tr>`}).join('')}</table></div></div>`;
+}
+function customerModal(c=null){
+ openModal(`<h3>${c?'Edit':'Add'} Customer</h3><div class="field"><label>Customer Name</label><input id="cName" value="${esc(c?.name||'')}"></div><div class="field"><label>Mobile</label><input id="cMobile" value="${esc(c?.mobile||'')}"></div><div class="actions"><button class="primary" onclick="saveCustomer(${c?.id||0})">Save</button><button class="gray" onclick="closeModal()">Cancel</button></div>`);
+}
+function saveCustomer(id){let name=cName.value.trim(),mobile=cMobile.value.trim();if(!name)return alert('Enter customer name');if(id)Object.assign(db.customers.find(x=>x.id===id),{name,mobile});else db.customers.push({id:Date.now(),name,mobile});save();closeModal();customersPage()}
+function historyPage(){
+ let rows=db.tx.slice().reverse();document.getElementById('content').innerHTML=`<h2>Transaction History</h2><div class="card table-wrap"><table class="table"><tr><th>Date/Time</th><th>Vehicle</th><th>Customer</th><th>Type</th><th>Qty</th></tr>${rows.map(t=>`<tr><td>${new Date(t.time).toLocaleString()}</td><td>${esc(db.vehicles.find(v=>v.id===t.vehicleId)?.no||'-')}</td><td>${esc(db.customers.find(c=>c.id===t.customerId)?.name||'-')}</td><td><span class="pill">${t.type.toUpperCase()}</span></td><td>${t.qty}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No transactions</td></tr>'}</table></div>`;
+}
+function driverPage(p){
+ let v=session.user;setNav([['driver','🚚 My Vehicle'],['customers','👥 Customers'],['history','📜 History']],p);
+ if(p==='driver') driverDashboard(v);if(p==='customers') driverCustomers(v);if(p==='history') driverHistory(v);
+}
+function driverDashboard(v){
+ let x=totalsVehicle(v), rows=db.customers.map(c=>({c,x:customerTotals(c,v.id)})).filter(z=>z.x.out||z.x.ret);
+ document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)}</h2><div class="grid">
+ <div class="card stat"><div class="muted">Total Assigned</div><div class="num">${v.assigned}</div></div><div class="card stat"><div class="muted">Total Out</div><div class="num">${x.out}</div></div><div class="card stat"><div class="muted">Returned</div><div class="num">${x.ret}</div></div><div class="card stat"><div class="muted">Current In Vehicle</div><div class="num">${x.current}</div></div></div>
+ <div class="section actions"><button class="primary" onclick="txModal('out',${v.id})">📤 CRATE OUT</button><button class="secondary" onclick="txModal('return',${v.id})">📥 CRATE RETURN</button></div>
+ <div class="section card"><h3>Customer-wise Crate Account</h3>${customerTable(v.id)}</div>`;
+}
+function customerTable(vehicleId){
+ return `<div class="table-wrap"><table class="table"><tr><th>Customer</th><th>Given</th><th>Returned</th><th>Pending</th></tr>${db.customers.map(c=>{let x=customerTotals(c,vehicleId);return `<tr><td>${esc(c.name)}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.pending}</b></td></tr>`}).join('')}</table></div>`;
+}
+function driverCustomers(v){document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)}</h2><div class="muted" style="margin:-8px 0 14px">Driver: ${esc(v.driver)}</div><div class="card">${customerTable(v.id)}</div>`}
+function driverHistory(v){
+ let rows=db.tx.filter(t=>t.vehicleId===v.id).reverse();document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)} History</h2><div class="card table-wrap"><table class="table"><tr><th>Date/Time</th><th>Customer</th><th>Type</th><th>Qty</th></tr>${rows.map(t=>`<tr><td>${new Date(t.time).toLocaleString()}</td><td>${esc(db.customers.find(c=>c.id===t.customerId)?.name||'-')}</td><td>${t.type.toUpperCase()}</td><td>${t.qty}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No transactions</td></tr>'}</table></div>`;
+}
+function txModal(type,vehicleId){
+ let v=db.vehicles.find(x=>x.id===vehicleId);
+ let options=db.customers.map(c=>{
+   let pending=customerTotals(c,vehicleId).pending;
+   return `<option value="${c.id}">${esc(c.name)}${type==='return'?' - Pending: '+pending:''}</option>`;
+ }).join('');
+ openModal(`<h3>${type==='out'?'📤 Crate Out':'📥 Crate Return'}</h3>
+ <div class="field"><label>Customer</label><select id="txCustomer">${options}</select></div>
+ <div class="field"><label>${type==='return'?'Returned Crates':'Crates to Give'}</label><input id="txQty" type="number" min="1" step="1" placeholder="Enter crates"></div>
+ <button class="primary" style="width:100%" onclick="saveTx('${type}',${vehicleId})">Submit</button>`);
+}
+function saveTx(type,vehicleId){
+ let customerId=+document.getElementById('txCustomer').value;
+ let qty=Number(document.getElementById('txQty').value);
+ if(!qty || qty<=0){ alert('Please enter a valid crate quantity.'); return; }
+
+ let v=db.vehicles.find(x=>x.id===vehicleId);
+ let customer=db.customers.find(x=>x.id===customerId);
+ let vehicleBal=totalsVehicle(v).current;
+ let c=customerTotals(customer,vehicleId);
+
+ if(type==='out'){
+   if(qty>vehicleBal){
+     alert('Not enough crates in vehicle. Current available crates: '+vehicleBal);
+     return;
+   }
+ }else{
+   if(c.pending<=0){
+     alert(customer.name+' has no pending crates for this vehicle.');
+     return;
+   }
+   if(qty>c.pending){
+     alert('Return quantity cannot exceed '+c.pending+' pending crates for '+customer.name+'.');
+     return;
+   }
+ }
+
+ db.tx.push({
+   id:Date.now(),
+   vehicleId:vehicleId,
+   customerId:customerId,
+   type:type,
+   qty:qty,
+   time:new Date().toISOString()
+ });
+ save();
+ closeModal();
+ if(session.role==='driver') driverDashboard(v);
+ else render();
+}
+function customerPage(p){
+ let c=session.user;setNav([['customer','👤 My Crates'],['history','📜 History']],p);if(p==='customer') customerDashboard(c);else customerHistory(c);
+}
+function customerDashboard(c){
+ let x=customerTotals(c);document.getElementById('content').innerHTML=`<h2>${esc(c.name)}</h2><div class="muted" style="margin:-8px 0 14px">Customer Crate Account</div><div class="grid"><div class="card stat"><div class="muted">Total Crates Received</div><div class="num">${x.out}</div></div><div class="card stat"><div class="muted">Total Returned</div><div class="num">${x.ret}</div></div><div class="card stat"><div class="muted">Pending Crates</div><div class="num">${x.pending}</div></div><div class="card stat"><div class="muted">Account Status</div><div class="num" style="font-size:20px">${x.pending?'Pending':'Clear'}</div></div></div><div class="section card"><h3>Vehicle-wise Received / Pending</h3><div class="table-wrap"><table class="table"><tr><th>Transport Name</th><th>Vehicle Number</th><th>Driver</th><th>Received</th><th>Returned</th><th>Pending</th></tr>${db.vehicles.map(v=>{let z=customerTotals(c,v.id);return `<tr><td>${esc(v.transport||'Warana Transport')}</td><td>${esc(v.no)}</td><td>${esc(v.driver)}</td><td>${z.out}</td><td>${z.ret}</td><td><b>${z.pending}</b></td></tr>`}).join('')}</table></div></div>`;
+}
+function customerHistory(c){
+ let rows=db.tx.filter(t=>t.customerId===c.id).reverse();document.getElementById('content').innerHTML=`<h2>My Crate History</h2><div class="card table-wrap"><table class="table"><tr><th>Date/Time</th><th>Transport Name</th><th>Vehicle Number</th><th>Driver</th><th>Type</th><th>Qty</th></tr>${rows.map(t=>{let v=db.vehicles.find(v=>v.id===t.vehicleId);return `<tr><td>${new Date(t.time).toLocaleString()}</td><td>${esc(v?.transport||'Warana Transport')}</td><td>${esc(v?.no||'-')}</td><td>${esc(v?.driver||'-')}</td><td>${t.type.toUpperCase()}</td><td>${t.qty}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No history</td></tr>'||'<tr><td colspan="5" class="empty">No history</td></tr>'}</table></div>`;
+}
+function customerDetails(id){let c=db.customers.find(x=>x.id===id),x=customerTotals(c);openModal(`<h3>${esc(c.name)}</h3><div class="grid"><div class="card"><b>${x.out}</b><br><span class="muted">Received</span></div><div class="card"><b>${x.ret}</b><br><span class="muted">Returned</span></div><div class="card"><b>${x.pending}</b><br><span class="muted">Pending</span></div></div><div class="actions" style="margin-top:15px"><button class="gray" onclick="closeModal()">Close</button></div>`)}
+function openModal(x){document.getElementById('modal').innerHTML=x;document.getElementById('modalBg').style.display='flex'}
+function closeModal(){document.getElementById('modalBg').style.display='none'}
+</script>
+</body>
+</html>
