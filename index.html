@@ -108,13 +108,12 @@ function login(){
    session={role:'admin',user:null};
  }else if(r==='driver'){
    const loginNo=String(u||'').replace(/\D/g,'');
-   if(!/^\d{4}$/.test(loginNo)) return alert('Driver login number must be exactly the last 4 digits, e.g. 1051.');
+   if(!/^\d{4}$/.test(loginNo)) return alert('Driver login number must be exactly 4 digits, e.g. 1051.');
+   const pin=String(p||'').trim();
    const matches=db.vehicles.filter(x=>vehicleLoginNo(x.no)===loginNo);
    if(matches.length===0) return alert('No vehicle found for login number '+loginNo+'.');
-   if(matches.length>1) return alert('This 4-digit login number is assigned to more than one vehicle. Admin must fix the duplicate vehicle login number.');
-   const v=matches[0];
-   if(!v.pin) return alert('Driver PIN is not set for this vehicle. Admin must edit the vehicle and set a PIN.');
-   if(String(p).trim()!==String(v.pin)) return alert('Incorrect Driver PIN.');
+   const v=matches.find(x=>String(x.pin||'')===pin);
+   if(!v) return alert('Incorrect Driver PIN for login number '+loginNo+'.');
    session={role:'driver',user:v};
  }else{
    const mobile=String(u).replace(/\D/g,'');
@@ -140,8 +139,11 @@ function sendDriverResetOtp(){
  if(!/^\d{4}$/.test(loginNo))return alert('Vehicle login number must be exactly 4 digits, e.g. 1051.');
  const matches=db.vehicles.filter(x=>vehicleLoginNo(x.no)===loginNo);
  if(matches.length===0)return alert('No vehicle found for login number '+loginNo+'.');
- if(matches.length>1)return alert('This 4-digit login number belongs to more than one vehicle. Admin must fix the duplicate.');
- const v=matches[0];
+ let mobileList=matches.filter(x=>x.mobile && /^\d{10}$/.test(String(x.mobile)));
+ let v=mobileList.length===1 ? mobileList[0] : null;
+ if(!v){
+   return alert('More than one vehicle uses login number '+loginNo+'. Admin/Driver must use the registered mobile number for PIN reset.');
+ }
  if(!v.mobile || !/^\d{10}$/.test(String(v.mobile)))return alert('Driver mobile number is not registered. Admin must edit this vehicle and add the 10-digit mobile number.');
  const otp=String(Math.floor(100000+Math.random()*900000));
  const otpData={vehicleId:v.id,otp,expires:Date.now()+5*60*1000};
@@ -265,7 +267,7 @@ function vehicleTable(){
    <label>Search Vehicle</label>
    <input id="vehicleSearch" value="${esc(document.getElementById('vehicleSearch')?.value||'')}" oninput="vehicleSearchChanged()" placeholder="Search vehicle, e.g. 1051">
  </div>
- <div class="muted" style="font-size:12px;margin:-5px 0 10px">Example: Vehicle <b>MH12YQ1051</b> can be found by searching <b>1051</b>.</div>
+ <div class="muted" style="font-size:12px;margin:-5px 0 10px">Driver login number = last 4 digits. Example: <b>MH12YQ1051 → 1051</b>. Driver PIN identifies the correct vehicle.</div>
  <div class="table-wrap"><table class="table"><tr><th>Transport Name</th><th>Vehicle Number</th><th>Driver Login</th><th>Driver</th><th>Assigned</th><th>Out</th><th>Return</th><th>Current</th><th>Action</th></tr>${list.map(v=>{let x=totalsVehicle(v);return `<tr><td><b>${esc(v.transport||'Warana Transport')}</b></td><td><b>${esc(v.no)}</b></td><td><span class="pill">${esc(vehicleLoginNo(v.no))}</span></td><td>${esc(v.driver)}</td><td>${v.assigned}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.current}</b></td><td><div class="actions"><button class="primary" onclick="addCratesModal(${v.id})">+ Crates</button><button class="secondary" onclick="vehicleModal(db.vehicles.find(x=>x.id===${v.id}))">Edit</button><button class="danger" onclick="deleteVehicle(${v.id})">Delete</button></div></td></tr>`}).join('')||'<tr><td colspan="9" class="empty">No matching vehicles</td></tr>'}</table></div>`;
 }
 function vehicleSearchChanged(){
@@ -311,9 +313,6 @@ function saveVehicle(id){
  if(!isValidVehicleNo(no))return alert('Enter a valid full vehicle number, for example MH12YQ1051.');
  const duplicate=db.vehicles.find(x=>normalizeVehicleNo(x.no)===no && x.id!==id);
  if(duplicate)return alert('This vehicle number is already added: '+duplicate.no);
- const loginNo=vehicleLoginNo(no);
- const duplicateLogin=db.vehicles.find(x=>vehicleLoginNo(x.no)===loginNo && x.id!==id);
- if(duplicateLogin)return alert('Driver login number '+loginNo+' is already assigned to vehicle '+duplicateLogin.no+'. Another vehicle cannot use the same last 4 digits.');
  if(id){
    let v=db.vehicles.find(x=>x.id===id); if(!v)return;
    let out=db.tx.filter(t=>t.vehicleId===id&&t.type==='out').reduce((a,t)=>a+t.qty,0), ret=db.tx.filter(t=>t.vehicleId===id&&t.type==='return').reduce((a,t)=>a+t.qty,0);
