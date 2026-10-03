@@ -40,7 +40,7 @@ input,select{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px
     <div class="field"><label>Username / Mobile</label><input id="username" placeholder="Enter username"></div>
     <div class="field"><label>Password</label><input id="password" type="password" placeholder="Enter password"></div>
     <button class="primary" style="width:100%" onclick="login()">Login</button>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Demo: admin/admin, driver/driver, customer/customer</p>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Demo: admin/admin • driver/customer login uses the first created record</p>
   </div>
 </div>
 
@@ -56,6 +56,7 @@ input,select{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px
 
 <script>
 const KEY='warana_crate_v2';
+const SESSION_KEY='warana_crate_session_v1';
 let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
  vehicles:[],
  customers:[],
@@ -64,15 +65,53 @@ let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
 let session=null;
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function showApp(){document.getElementById('login').style.display='none';document.getElementById('app').style.display='block'}
+function showLogin(){document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex'}
 function login(){
  const r=document.getElementById('role').value,u=document.getElementById('username').value.trim(),p=document.getElementById('password').value;
  if((r==='admin'&&u==='admin'&&p==='admin')||(r==='driver'&&u==='driver'&&p==='driver')||(r==='customer'&&u==='customer'&&p==='customer')){
-   session={role:r, user:r==='driver'?db.vehicles[0]:r==='customer'?db.customers[0]:null}; document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';render();
+   session={role:r, user:r==='driver'?db.vehicles[0]:r==='customer'?db.customers[0]:null};
+   sessionStorage.setItem(SESSION_KEY,JSON.stringify({role:r,userId:session.user?.id||null}));
+   showApp(); render();
  }else alert('Demo login: admin/admin, driver/driver, customer/customer');
 }
-function logout(){session=null;document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex'}
+function logout(){session=null;sessionStorage.removeItem(SESSION_KEY);showLogin()}
+function restoreSession(){
+ try{
+   const x=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');
+   if(!x)return;
+   if(x.role==='admin') session={role:'admin',user:null};
+   else if(x.role==='driver') { const v=db.vehicles.find(v=>v.id===x.userId); if(v) session={role:'driver',user:v}; else return logout(); }
+   else if(x.role==='customer') { const c=db.customers.find(c=>c.id===x.userId); if(c) session={role:'customer',user:c}; else return logout(); }
+   showApp(); render();
+ }catch(_){sessionStorage.removeItem(SESSION_KEY)}
+}
 function setNav(items,active){document.getElementById('nav').innerHTML=items.map(x=>`<button class="${active===x[0]?'active':''}" onclick="page('${x[0]}')">${x[1]}</button>`).join('')}
-function render(){document.getElementById('who').textContent=session.role.toUpperCase();page(session.role==='admin'?'dashboard':session.role==='driver'?'driver':'customer')}
+function render(){
+ if(!session)return;
+ document.getElementById('who').textContent=session.role.toUpperCase();
+ page(session.role==='admin'?'dashboard':session.role==='driver'?'driver':'customer');
+}
+
+// Auto-refresh without logging in again. This works between tabs/windows on the same origin.
+let lastDbSnapshot=localStorage.getItem(KEY)||'';
+window.addEventListener('storage',refreshFromStorage);
+setInterval(refreshFromStorage,2000);
+function refreshFromStorage(){
+  const raw=localStorage.getItem(KEY)||'';
+  if(raw===lastDbSnapshot || !raw)return;
+  lastDbSnapshot=raw;
+  try{db=JSON.parse(raw)||{vehicles:[],customers:[],tx:[]};}catch(_){return;}
+  if(!session)return;
+  if(session.role==='driver'){
+    const v=db.vehicles.find(v=>v.id===session.user?.id);
+    if(v) session.user=v;
+  }else if(session.role==='customer'){
+    const c=db.customers.find(c=>c.id===session.user?.id);
+    if(c) session.user=c;
+  }
+  render();
+}
 function totalsVehicle(v){
  let out=db.tx.filter(t=>t.vehicleId===v.id&&t.type==='out').reduce((a,t)=>a+t.qty,0);
  let ret=db.tx.filter(t=>t.vehicleId===v.id&&t.type==='return').reduce((a,t)=>a+t.qty,0);
@@ -100,7 +139,7 @@ function adminDashboard(){
  <div class="section card"><h3>Vehicle-wise Crates</h3>${vehicleTable()}</div>`;
 }
 function vehicleTable(){
- return `<div class="table-wrap"><table class="table"><tr><th>Transport Name</th><th>Vehicle Number</th><th>Driver</th><th>Assigned</th><th>Out</th><th>Return</th><th>Current</th></tr>${db.vehicles.map(v=>{let x=totalsVehicle(v);return `<tr><td><b>${esc(v.transport||'Warana Transport')}</b></td><td>${esc(v.no)}</td><td>${esc(v.driver)}</td><td>${v.assigned}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.current}</b></td></tr>`}).join('')}</table></div>`;
+ return `<div class="table-wrap"><table class="table"><tr><th>Transport Name</th><th>Vehicle Number</th><th>Driver</th><th>Assigned</th><th>Out</th><th>Return</th><th>Current</th><th>Action</th></tr>${db.vehicles.map(v=>{let x=totalsVehicle(v);return `<tr><td><b>${esc(v.transport||'Warana Transport')}</b></td><td>${esc(v.no)}</td><td>${esc(v.driver)}</td><td>${v.assigned}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.current}</b></td><td><div class="actions"><button class="primary" onclick="addCratesModal(${v.id})">+ Crates</button><button class="secondary" onclick="vehicleModal(db.vehicles.find(x=>x.id===${v.id}))">Edit</button><button class="danger" onclick="deleteVehicle(${v.id})">Delete</button></div></td></tr>`}).join('')||'<tr><td colspan="8" class="empty">No vehicles added</td></tr>'}</table></div>`;
 }
 function vehiclesPage(){
  document.getElementById('content').innerHTML=`<div class="actions" style="justify-content:space-between"><h2>Vehicle Management</h2><button class="primary" onclick="vehicleModal()">+ Add Vehicle</button></div>
@@ -111,26 +150,96 @@ function vehicleModal(v=null){
  <div class="field"><label>Transport Name</label><input id="mTransport" value="${esc(v?.transport||'Warana Transport')}" placeholder="Enter transport name"></div>
  <div class="field"><label>Vehicle Number</label><input id="mNo" value="${esc(v?.no||'')}" placeholder="MH12 AB 1234"></div>
  <div class="field"><label>Driver Name</label><input id="mDriver" value="${esc(v?.driver||'')}"></div>
- <div class="field"><label>Total Assigned Crates</label><input id="mCrates" type="number" min="0" value="${v?.assigned||0}"></div>
+ <div class="field"><label>Initial Assigned Crates</label><input id="mCrates" type="number" min="0" value="${v?.assigned||0}"></div>
  <div class="actions"><button class="primary" onclick="saveVehicle(${v?.id||0})">Save</button><button class="gray" onclick="closeModal()">Cancel</button></div>`);
 }
 function saveVehicle(id){
  let transport=document.getElementById('mTransport').value.trim(),no=document.getElementById('mNo').value.trim(),driver=document.getElementById('mDriver').value.trim(),assigned=+document.getElementById('mCrates').value||0;
  if(!transport||!no||!driver)return alert('Enter transport name, vehicle number and driver name');
- if(id){let v=db.vehicles.find(x=>x.id===id);Object.assign(v,{transport,no,driver,assigned})}
- else db.vehicles.push({id:Date.now(),transport,no,driver,assigned});
- save();closeModal();vehiclesPage();
+ if(id){
+   let v=db.vehicles.find(x=>x.id===id); if(!v)return;
+   let out=db.tx.filter(t=>t.vehicleId===id&&t.type==='out').reduce((a,t)=>a+t.qty,0), ret=db.tx.filter(t=>t.vehicleId===id&&t.type==='return').reduce((a,t)=>a+t.qty,0);
+   if(assigned + ret < out)return alert('Assigned crates cannot be less than crates already given out.');
+   Object.assign(v,{transport,no,driver,assigned});
+ }else db.vehicles.push({id:Date.now(),transport,no,driver,assigned});
+ save();lastDbSnapshot=localStorage.getItem(KEY)||'';closeModal();vehiclesPage();
+}
+function addCratesModal(vehicleId){
+ const v=db.vehicles.find(x=>x.id===vehicleId); if(!v)return;
+ openModal(`<h3>➕ Add Crates - ${esc(v.no)}</h3><div class="muted" style="margin-bottom:12px">Transport: ${esc(v.transport||'Warana Transport')}</div><div class="field"><label>Crates to Add</label><input id="addQty" type="number" min="1" step="1" placeholder="Enter crates"></div><div class="actions"><button class="primary" onclick="addCrates(${vehicleId})">Add Crates</button><button class="gray" onclick="closeModal()">Cancel</button></div>`);
+}
+function addCrates(vehicleId){
+ const qty=Number(document.getElementById('addQty').value); if(!qty||qty<=0)return alert('Enter a valid crate quantity.');
+ const v=db.vehicles.find(x=>x.id===vehicleId); if(!v)return;
+ v.assigned += qty;
+ save(); lastDbSnapshot=localStorage.getItem(KEY)||''; closeModal(); vehiclesPage();
+}
+function deleteVehicle(id){
+ const v=db.vehicles.find(x=>x.id===id); if(!v)return;
+ if(db.tx.some(t=>t.vehicleId===id))return alert('This vehicle has transaction entries. Delete/edit those entries first.');
+ if(!confirm(`Delete vehicle ${v.no}?`))return;
+ db.vehicles=db.vehicles.filter(x=>x.id!==id);save();lastDbSnapshot=localStorage.getItem(KEY)||'';vehiclesPage();
 }
 function customersPage(){
  document.getElementById('content').innerHTML=`<div class="actions" style="justify-content:space-between"><h2>Customer Management</h2><button class="primary" onclick="customerModal()">+ Add Customer</button></div>
- <div class="section card"><div class="table-wrap"><table class="table"><tr><th>Customer</th><th>Mobile</th><th>Received</th><th>Returned</th><th>Pending</th><th>Action</th></tr>${db.customers.map(c=>{let x=customerTotals(c);return `<tr><td>${esc(c.name)}</td><td>${esc(c.mobile)}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.pending}</b></td><td><button class="secondary" onclick="customerDetails(${c.id})">View</button></td></tr>`}).join('')}</table></div></div>`;
+ <div class="section card"><div class="table-wrap"><table class="table"><tr><th>Customer</th><th>Mobile</th><th>Received</th><th>Returned</th><th>Pending</th><th>Action</th></tr>${db.customers.map(c=>{let x=customerTotals(c);return `<tr><td>${esc(c.name)}</td><td>${esc(c.mobile)}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.pending}</b></td><td><div class="actions"><button class="secondary" onclick="customerDetails(${c.id})">View</button><button class="gray" onclick="customerModal(db.customers.find(x=>x.id===${c.id}))">Edit</button><button class="danger" onclick="deleteCustomer(${c.id})">Delete</button></div></td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No customers added</td></tr>'}</table></div></div>`;
+}
+function deleteCustomer(id){
+ const c=db.customers.find(x=>x.id===id); if(!c)return;
+ if(db.tx.some(t=>t.customerId===id))return alert('This customer has transaction entries. Delete/edit those entries first.');
+ if(!confirm(`Delete customer ${c.name}?`))return;
+ db.customers=db.customers.filter(x=>x.id!==id);save();lastDbSnapshot=localStorage.getItem(KEY)||'';customersPage();
 }
 function customerModal(c=null){
  openModal(`<h3>${c?'Edit':'Add'} Customer</h3><div class="field"><label>Customer Name</label><input id="cName" value="${esc(c?.name||'')}"></div><div class="field"><label>Mobile</label><input id="cMobile" value="${esc(c?.mobile||'')}"></div><div class="actions"><button class="primary" onclick="saveCustomer(${c?.id||0})">Save</button><button class="gray" onclick="closeModal()">Cancel</button></div>`);
 }
-function saveCustomer(id){let name=cName.value.trim(),mobile=cMobile.value.trim();if(!name)return alert('Enter customer name');if(id)Object.assign(db.customers.find(x=>x.id===id),{name,mobile});else db.customers.push({id:Date.now(),name,mobile});save();closeModal();customersPage()}
+function saveCustomer(id){let name=document.getElementById('cName').value.trim(),mobile=document.getElementById('cMobile').value.trim();if(!name)return alert('Enter customer name');if(id)Object.assign(db.customers.find(x=>x.id===id),{name,mobile});else db.customers.push({id:Date.now(),name,mobile});save();lastDbSnapshot=localStorage.getItem(KEY)||'';closeModal();customersPage()}
 function historyPage(){
- let rows=db.tx.slice().reverse();document.getElementById('content').innerHTML=`<h2>Transaction History</h2><div class="card table-wrap"><table class="table"><tr><th>Date/Time</th><th>Vehicle</th><th>Customer</th><th>Type</th><th>Qty</th></tr>${rows.map(t=>`<tr><td>${new Date(t.time).toLocaleString()}</td><td>${esc(db.vehicles.find(v=>v.id===t.vehicleId)?.no||'-')}</td><td>${esc(db.customers.find(c=>c.id===t.customerId)?.name||'-')}</td><td><span class="pill">${t.type.toUpperCase()}</span></td><td>${t.qty}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No transactions</td></tr>'}</table></div>`;
+ let rows=db.tx.slice().reverse();
+ document.getElementById('content').innerHTML=`<h2>Transaction History</h2><div class="card table-wrap"><table class="table"><tr><th>Date/Time</th><th>Vehicle</th><th>Customer</th><th>Type</th><th>Qty</th><th>Action</th></tr>${rows.map(t=>`<tr><td>${new Date(t.time).toLocaleString()}</td><td>${esc(db.vehicles.find(v=>v.id===t.vehicleId)?.no||'-')}</td><td>${esc(db.customers.find(c=>c.id===t.customerId)?.name||'-')}</td><td><span class="pill">${t.type.toUpperCase()}</span></td><td>${t.qty}</td><td><div class="actions"><button class="gray" onclick="editTxModal(${t.id})">Edit</button><button class="danger" onclick="deleteTx(${t.id})">Delete</button></div></td></tr>`).join('')||'<tr><td colspan="6" class="empty">No transactions</td></tr>'}</table></div>`;
+}
+function txTotalsAfterChange(txList, vehicleId){
+ const out=txList.filter(t=>t.vehicleId===vehicleId&&t.type==='out').reduce((a,t)=>a+t.qty,0);
+ const ret=txList.filter(t=>t.vehicleId===vehicleId&&t.type==='return').reduce((a,t)=>a+t.qty,0);
+ return {out,ret};
+}
+function validateTxList(txList, txId, newType, newQty){
+ const candidate=txList.map(t=>t.id===txId?{...t,type:newType,qty:newQty}:t);
+ const t0=txList.find(t=>t.id===txId); if(!t0)return {ok:false,msg:'Entry not found.'};
+ const v=db.vehicles.find(v=>v.id===t0.vehicleId); if(!v)return {ok:false,msg:'Vehicle not found.'};
+ const vt=txTotalsAfterChange(candidate,t0.vehicleId);
+ if(vt.out>v.assigned+vt.ret)return {ok:false,msg:'This edit would make vehicle crates negative.'};
+ for(const c of db.customers){
+   const out=candidate.filter(t=>t.customerId===c.id&&t.type==='out').reduce((a,t)=>a+t.qty,0);
+   const ret=candidate.filter(t=>t.customerId===c.id&&t.type==='return').reduce((a,t)=>a+t.qty,0);
+   if(ret>out)return {ok:false,msg:`${c.name} would have negative pending crates.`};
+ }
+ return {ok:true,candidate};
+}
+function editTxModal(id){
+ const t=db.tx.find(x=>x.id===id);if(!t)return;
+ openModal(`<h3>✏️ Edit Crate Entry</h3><div class="field"><label>Type</label><select id="editType"><option value="out" ${t.type==='out'?'selected':''}>Crate Out</option><option value="return" ${t.type==='return'?'selected':''}>Crate Return</option></select></div><div class="field"><label>Quantity</label><input id="editQty" type="number" min="1" value="${t.qty}"></div><div class="actions"><button class="primary" onclick="saveEditedTx(${id})">Save</button><button class="gray" onclick="closeModal()">Cancel</button></div>`);
+}
+function saveEditedTx(id){
+ const newType=document.getElementById('editType').value,newQty=Number(document.getElementById('editQty').value);
+ if(!newQty||newQty<=0)return alert('Enter a valid quantity.');
+ const check=validateTxList(db.tx,id,newType,newQty);if(!check.ok)return alert(check.msg);
+ db.tx=check.candidate;save();lastDbSnapshot=localStorage.getItem(KEY)||'';closeModal();historyPage();
+}
+function deleteTx(id){
+ const t=db.tx.find(x=>x.id===id);if(!t)return;
+ if(!confirm(`Delete this ${t.type} entry of ${t.qty} crates?`))return;
+ const candidate=db.tx.filter(x=>x.id!==id);
+ const v=db.vehicles.find(v=>v.id===t.vehicleId);
+ if(!v)return alert('Vehicle not found.');
+ const vt=txTotalsAfterChange(candidate,t.vehicleId);
+ if(vt.out>v.assigned+vt.ret)return alert('Cannot delete: vehicle crate balance would become invalid.');
+ for(const c of db.customers){
+   const out=candidate.filter(x=>x.customerId===c.id&&x.type==='out').reduce((a,x)=>a+x.qty,0);
+   const ret=candidate.filter(x=>x.customerId===c.id&&x.type==='return').reduce((a,x)=>a+x.qty,0);
+   if(ret>out)return alert(`Cannot delete: ${c.name} would have negative pending crates.`);
+ }
+ db.tx=candidate;save();lastDbSnapshot=localStorage.getItem(KEY)||'';historyPage();
 }
 function driverPage(p){
  let v=session.user;setNav([['driver','🚚 My Vehicle'],['customers','👥 Customers'],['history','📜 History']],p);
@@ -212,6 +321,7 @@ function customerHistory(c){
 function customerDetails(id){let c=db.customers.find(x=>x.id===id),x=customerTotals(c);openModal(`<h3>${esc(c.name)}</h3><div class="grid"><div class="card"><b>${x.out}</b><br><span class="muted">Received</span></div><div class="card"><b>${x.ret}</b><br><span class="muted">Returned</span></div><div class="card"><b>${x.pending}</b><br><span class="muted">Pending</span></div></div><div class="actions" style="margin-top:15px"><button class="gray" onclick="closeModal()">Close</button></div>`)}
 function openModal(x){document.getElementById('modal').innerHTML=x;document.getElementById('modalBg').style.display='flex'}
 function closeModal(){document.getElementById('modalBg').style.display='none'}
+restoreSession();
 </script>
 </body>
 </html>
