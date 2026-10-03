@@ -55,10 +55,10 @@ input,select{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px
 <div id="modalBg" class="modal-bg"><div class="card modal" id="modal"></div></div>
 
 <script>
-const KEY='warana_crate_v1';
+const KEY='warana_crate_v2';
 let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
- vehicles:[{id:1,no:'MH12 AB 1234',transport:'Warana Transport',driver:'Ramesh',assigned:100},{id:2,no:'MH12 CD 5678',transport:'Warana Transport',driver:'Suresh',assigned:80}],
- customers:[{id:1,name:'Anand Dairy',mobile:'9999999999'},{id:2,name:'ABC Hotel',mobile:'8888888888'},{id:3,name:'Karegaon Shop',mobile:'7777777777'}],
+ vehicles:[],
+ customers:[],
  tx:[]
 };
 let session=null;
