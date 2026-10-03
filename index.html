@@ -43,7 +43,7 @@ input,select{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px
     <div class="field"><label>Password</label><input id="password" type="password" placeholder="Enter password"></div>
     <button class="primary" style="width:100%" onclick="login()">Login</button>
     <button id="forgotPinBtn" class="secondary" style="width:100%;margin-top:8px" onclick="openDriverPinReset()">Forgot / Reset Driver PIN</button>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Driver login: registered vehicle number + 4-digit PIN</p>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Driver login: registered vehicle number + Driver PIN</p>
   </div>
 </div>
 
@@ -93,6 +93,8 @@ function updateLoginFields(){
    userInput.placeholder='Enter username';
    passField.classList.remove('hidden');
  }
+ const forgot=document.getElementById('forgotPinBtn');
+ if(forgot)forgot.style.display=r==='driver'?'block':'none';
 }
 function login(){
  const r=document.getElementById('role').value;
@@ -132,7 +134,7 @@ function sendDriverResetOtp(){
  const vehicleNo=normalizeVehicleNo(document.getElementById('resetVehicle').value);
  const v=db.vehicles.find(x=>normalizeVehicleNo(x.no)===vehicleNo);
  if(!v)return alert('Vehicle number not found.');
- if(!v.mobile || !/^\\d{10}$/.test(String(v.mobile)))return alert('Driver mobile number is not registered. Admin must edit this vehicle and add the 10-digit mobile number.');
+ if(!v.mobile || !/^\d{10}$/.test(String(v.mobile)))return alert('Driver mobile number is not registered. Admin must edit this vehicle and add the 10-digit mobile number.');
  const otp=String(Math.floor(100000+Math.random()*900000));
  const otpData={vehicleId:v.id,otp,expires:Date.now()+5*60*1000};
  sessionStorage.setItem('warana_driver_reset_otp',JSON.stringify(otpData));
@@ -150,7 +152,7 @@ function verifyDriverResetOtp(){
  const pin=String(document.getElementById('newPin').value||'').trim();
  if(!data || Date.now()>data.expires)return alert('OTP expired. Please request a new OTP.');
  if(otp!==data.otp)return alert('Incorrect OTP.');
- if(!/^\\d{4}$/.test(pin))return alert('New PIN must be exactly 4 digits.');
+ if(!/^\d{4}$/.test(pin))return alert('New PIN must be exactly 4 digits.');
  const v=db.vehicles.find(x=>x.id===data.vehicleId);
  if(!v)return alert('Vehicle not found.');
  v.pin=pin;
@@ -161,7 +163,7 @@ function verifyDriverResetOtp(){
 }
 function logout(){session=null;localStorage.removeItem(SESSION_KEY);showLogin()}
 function normalizeExistingVehicleNumbers(){
- db.vehicles.forEach(v=>{v.no=normalizeVehicleNo(v.no); if(!v.pin) v.pin='1234'; if(!v.mobile) v.mobile='';});
+ db.vehicles.forEach(v=>{v.no=normalizeVehicleNo(v.no); if(!v.pin) v.pin='1234'; if(!v.mobile) v.mobile=''; v.mobile=String(v.mobile||'').replace(/\D/g,'');});
  localStorage.setItem(KEY,JSON.stringify(db));
 }
 function restoreSession(){
@@ -480,7 +482,7 @@ function driverDashboard(v){
  let x=totalsVehicle(v), rows=db.customers.map(c=>({c,x:customerTotals(c,v.id)})).filter(z=>z.x.out||z.x.ret);
  document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)}</h2><div class="grid">
  <div class="card stat"><div class="muted">Total Assigned</div><div class="num">${v.assigned}</div></div><div class="card stat"><div class="muted">Total Out</div><div class="num">${x.out}</div></div><div class="card stat"><div class="muted">Returned</div><div class="num">${x.ret}</div></div><div class="card stat"><div class="muted">Current In Vehicle</div><div class="num">${x.current}</div></div></div>
- <div class="section actions"><button class="primary" onclick="txModal('out',${v.id})">📤 CRATE OUT</button><button class="secondary" onclick="txModal('return',${v.id})">📥 CRATE RETURN</button></div>
+ <div class="section actions"><button class="primary" onclick="txModal('out',${v.id})">📤 CRATE OUT</button><button class="secondary" onclick="txModal('return',${v.id})">📥 CRATE RETURN</button><button class="gray" onclick="changeDriverPinModal(${v.id})">🔐 Change PIN</button></div>
  <div class="section card"><h3>Customer-wise Crate Account</h3>${customerTable(v.id)}</div>`;
 }
 function customerTable(vehicleId){
@@ -489,6 +491,31 @@ function customerTable(vehicleId){
 function driverCustomers(v){document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)}</h2><div class="muted" style="margin:-8px 0 14px">Driver: ${esc(v.driver)}</div><div class="card">${customerTable(v.id)}</div>`}
 function driverHistory(v){
  let rows=db.tx.filter(t=>t.vehicleId===v.id).reverse();document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)} History</h2><div class="card table-wrap"><table class="table"><tr><th>Date/Time</th><th>Customer</th><th>Type</th><th>Qty</th></tr>${rows.map(t=>`<tr><td>${new Date(t.time).toLocaleString()}</td><td>${esc(db.customers.find(c=>c.id===t.customerId)?.name||'-')}</td><td>${t.type.toUpperCase()}</td><td>${t.qty}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No transactions</td></tr>'}</table></div>`;
+}
+function changeDriverPinModal(vehicleId){
+ const v=db.vehicles.find(x=>x.id===vehicleId);
+ if(!v)return;
+ openModal(`<h3>🔐 Change Driver PIN</h3>
+ <div class="field"><label>Current PIN</label><input id="currentPin" type="password" inputmode="numeric" maxlength="4" placeholder="4-digit PIN"></div>
+ <div class="field"><label>New PIN</label><input id="changedPin" type="password" inputmode="numeric" maxlength="4" placeholder="New 4-digit PIN"></div>
+ <div class="field"><label>Confirm New PIN</label><input id="confirmPin" type="password" inputmode="numeric" maxlength="4" placeholder="Repeat new PIN"></div>
+ <div class="actions"><button class="primary" onclick="changeDriverPin(${vehicleId})">Save New PIN</button><button class="gray" onclick="closeModal()">Cancel</button></div>`);
+}
+function changeDriverPin(vehicleId){
+ const v=db.vehicles.find(x=>x.id===vehicleId);
+ if(!v)return;
+ const current=String(document.getElementById('currentPin').value||'').trim();
+ const next=String(document.getElementById('changedPin').value||'').trim();
+ const confirmNext=String(document.getElementById('confirmPin').value||'').trim();
+ if(current!==String(v.pin||''))return alert('Current PIN is incorrect.');
+ if(!/^\d{4}$/.test(next))return alert('New PIN must be exactly 4 digits.');
+ if(next!==confirmNext)return alert('New PIN and Confirm PIN do not match.');
+ if(next===current)return alert('New PIN must be different from current PIN.');
+ v.pin=next;
+ save();
+ if(session?.role==='driver')session.user=v;
+ closeModal();
+ alert('Driver PIN changed successfully.');
 }
 function txModal(type,vehicleId){
  let v=db.vehicles.find(x=>x.id===vehicleId);
