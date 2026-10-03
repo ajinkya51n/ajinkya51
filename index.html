@@ -42,13 +42,17 @@ input,select{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px
     <div class="field"><label>Username / Mobile</label><input id="username" placeholder="Enter username"></div>
     <div class="field"><label>Password</label><input id="password" type="password" placeholder="Enter password"></div>
     <button class="primary" style="width:100%" onclick="login()">Login</button>
-    <button id="forgotPinBtn" class="secondary" style="width:100%;margin-top:8px" onclick="openDriverPinReset()">Forgot / Reset Driver PIN</button><p class="muted" style="font-size:12px;margin-bottom:0">Driver login: last 4 digits of vehicle number + Driver PIN</p>
+    <button id="forgotPinBtn" class="secondary" style="width:100%;margin-top:8px" onclick="openDriverPinReset()">Forgot / Reset Driver PIN</button><p class="muted" style="font-size:12px;margin-bottom:0">Driver login: last 4 digits only (e.g. 1051) + Driver PIN</p>
     
   </div>
 </div>
 
 <div id="app" class="app">
-  <div class="top"><div class="brand">🥛 Warana Dairy Crate Management <span class="pill">v2.1</span></div><div class="actions"><span id="who" class="pill"></span><button class="gray" onclick="logout()">Logout</button></div></div>
+  <div class="top"><div class="brand">🥛 Warana Dairy Crate Management <span class="pill">v3.0</span></div><div class="actions">
+ <span id="who" class="pill"></span>
+ <button id="refreshBtn" class="secondary" onclick="refreshWithoutLogout()">🔄 Refresh</button>
+ <button class="gray" onclick="logout()">Logout</button>
+</div></div>
   <div class="wrap">
     <div id="nav" class="nav"></div>
     <div id="content"></div>
@@ -58,8 +62,8 @@ input,select{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px
 <div id="modalBg" class="modal-bg"><div class="card modal" id="modal"></div></div>
 
 <script>
-const KEY='warana_crate_v2';
-const SESSION_KEY='warana_crate_session_v2';
+const KEY='warana_crate_v3';
+const SESSION_KEY='warana_crate_session_v3';
 let db=JSON.parse(localStorage.getItem(KEY)||'null')||{
  vehicles:[],
  customers:[],
@@ -80,6 +84,7 @@ function updateLoginFields(){
    userInput.placeholder='Enter last 4 digits, e.g. 1051';
    userInput.setAttribute('maxlength','4');
    userInput.setAttribute('inputmode','numeric');
+   userInput.oninput=()=>{userInput.value=userInput.value.replace(/\D/g,'').slice(0,4)};
    passField.classList.remove('hidden');
    const passLabel=document.querySelector('#password').parentElement.querySelector('label');
    passLabel.textContent='Driver PIN';
@@ -108,13 +113,26 @@ function login(){
    session={role:'admin',user:null};
  }else if(r==='driver'){
    const loginNo=String(u||'').replace(/\D/g,'');
-   if(!/^\d{4}$/.test(loginNo)) return alert('Driver login number must be exactly 4 digits, e.g. 1051.');
-   const pin=String(p||'').trim();
-   const matches=db.vehicles.filter(x=>vehicleLoginNo(x.no)===loginNo);
-   if(matches.length===0) return alert('No vehicle found for login number '+loginNo+'.');
-   const v=matches.find(x=>String(x.pin||'')===pin);
-   if(!v) return alert('Incorrect Driver PIN for login number '+loginNo+'.');
-   session={role:'driver',user:v};
+   const enteredPin=String(p||'').trim();
+
+   // Driver username is ONLY the last 4 digits of the vehicle number.
+   if(!/^\d{4}$/.test(loginNo))
+     return alert('Enter the 4-digit Driver Login Number. Example: 1051.');
+
+   // Same last 4 digits are allowed on multiple vehicles.
+   // The PIN selects the correct vehicle.
+   const matches=db.vehicles.filter(v=>vehicleLoginNo(v.no)===loginNo);
+   if(matches.length===0)
+     return alert('Driver Login Number '+loginNo+' is not registered.');
+
+   const pinMatches=matches.filter(v=>String(v.pin||'').trim()===enteredPin);
+   if(pinMatches.length===0)
+     return alert('Incorrect Driver PIN.');
+
+   if(pinMatches.length>1)
+     return alert('The same 4-digit login number and PIN are assigned to more than one vehicle. Admin must give each driver a different PIN.');
+
+   session={role:'driver',user:pinMatches[0]};
  }else{
    const mobile=String(u).replace(/\D/g,'');
    const c=db.customers.find(x=>String(x.mobile||'').replace(/\D/g,'')===mobile);
@@ -139,12 +157,17 @@ function sendDriverResetOtp(){
  if(!/^\d{4}$/.test(loginNo))return alert('Vehicle login number must be exactly 4 digits, e.g. 1051.');
  const matches=db.vehicles.filter(x=>vehicleLoginNo(x.no)===loginNo);
  if(matches.length===0)return alert('No vehicle found for login number '+loginNo+'.');
- let mobileList=matches.filter(x=>x.mobile && /^\d{10}$/.test(String(x.mobile)));
+
+ let mobileList=matches.filter(x=>/^\d{10}$/.test(String(x.mobile||'')));
  let v=mobileList.length===1 ? mobileList[0] : null;
- if(!v){
-   return alert('More than one vehicle uses login number '+loginNo+'. Admin/Driver must use the registered mobile number for PIN reset.');
+ if(mobileList.length>1){
+   openModal(`<h3>📱 Verify Driver Mobile</h3>
+   <p class="muted">Multiple vehicles use <b>${esc(loginNo)}</b>. Enter the registered driver mobile number.</p>
+   <div class="field"><label>Driver Mobile Number</label><input id="resetMobile" inputmode="numeric" maxlength="10" placeholder="10-digit mobile number"></div>
+   <button class="primary" style="width:100%" onclick="sendDriverResetOtpWithMobile('${loginNo}')">Continue</button>`);
+   return;
  }
- if(!v.mobile || !/^\d{10}$/.test(String(v.mobile)))return alert('Driver mobile number is not registered. Admin must edit this vehicle and add the 10-digit mobile number.');
+ if(!v)return alert('Driver mobile number is not registered. Admin must edit this vehicle and add it.');
  const otp=String(Math.floor(100000+Math.random()*900000));
  const otpData={vehicleId:v.id,otp,expires:Date.now()+5*60*1000};
  sessionStorage.setItem('warana_driver_reset_otp',JSON.stringify(otpData));
@@ -155,6 +178,21 @@ function sendDriverResetOtp(){
  <div class="field"><label>New Driver PIN</label><input id="newPin" type="password" inputmode="numeric" maxlength="4" placeholder="4-digit PIN"></div>
  <button class="primary" style="width:100%" onclick="verifyDriverResetOtp()">Verify OTP & Reset PIN</button>
  <p class="muted" style="font-size:12px">Demo mode: generated OTP is <b>${otp}</b>. Real SMS OTP requires a backend/SMS provider.</p>`);
+}
+function sendDriverResetOtpWithMobile(loginNo){
+ const mobile=String(document.getElementById('resetMobile').value||'').replace(/\D/g,'');
+ if(!/^\d{10}$/.test(mobile))return alert('Enter the registered 10-digit mobile number.');
+ const matches=db.vehicles.filter(x=>vehicleLoginNo(x.no)===loginNo && String(x.mobile||'')===mobile);
+ if(matches.length!==1)return alert('Vehicle login number and mobile number do not match.');
+ const v=matches[0];
+ const otp=String(Math.floor(100000+Math.random()*900000));
+ sessionStorage.setItem('warana_driver_reset_otp',JSON.stringify({vehicleId:v.id,otp,expires:Date.now()+5*60*1000}));
+ openModal(`<h3>📱 OTP Verification</h3>
+ <p>OTP sent to mobile ending <b>${esc(String(v.mobile).slice(-4))}</b>.</p>
+ <div class="field"><label>Enter OTP</label><input id="resetOtp" type="tel" inputmode="numeric" maxlength="6" placeholder="6-digit OTP"></div>
+ <div class="field"><label>New Driver PIN</label><input id="newPin" type="password" inputmode="numeric" maxlength="4" placeholder="4-digit PIN"></div>
+ <button class="primary" style="width:100%" onclick="verifyDriverResetOtp()">Verify OTP & Reset PIN</button>
+ <p class="muted" style="font-size:12px">Demo mode: generated OTP is <b>${otp}</b>. Real SMS requires a backend/SMS provider.</p>`);
 }
 function verifyDriverResetOtp(){
  const data=JSON.parse(sessionStorage.getItem('warana_driver_reset_otp')||'null');
@@ -171,9 +209,48 @@ function verifyDriverResetOtp(){
  closeModal();
  alert('Driver PIN reset successfully. You can now login with the new PIN.');
 }
+function refreshWithoutLogout(showMessage=false){
+ try{
+   const latest=JSON.parse(localStorage.getItem(KEY)||'null');
+   if(latest){
+     db=latest;
+     normalizeExistingVehicleNumbers();
+   }
+   // Re-bind the current user record from the latest database.
+   if(session?.role==='driver' && session.user){
+     const v=db.vehicles.find(x=>x.id===session.user.id);
+     if(v) session.user=v;
+   }
+   if(session?.role==='customer' && session.user){
+     const c=db.customers.find(x=>x.id===session.user.id);
+     if(c) session.user=c;
+   }
+   render();
+   if(showMessage) alert('Data refreshed. Login is still active.');
+ }catch(e){
+   console.error(e);
+   if(showMessage) alert('Refresh failed.');
+ }
+}
+let autoRefreshTimer=null;
+function startAutoRefresh(){
+ clearInterval(autoRefreshTimer);
+ autoRefreshTimer=setInterval(()=>{
+   try{
+     const stamp=localStorage.getItem(KEY)||'';
+     if(stamp!==window.__lastDbStorage){
+       window.__lastDbStorage=stamp;
+       refreshWithoutLogout(false);
+     }
+   }catch(e){}
+ },5000);
+}
+window.addEventListener('storage', (e)=>{
+ if(e.key===KEY) refreshWithoutLogout(false);
+});
 function logout(){session=null;localStorage.removeItem(SESSION_KEY);showLogin()}
 function normalizeExistingVehicleNumbers(){
- db.vehicles.forEach(v=>{v.no=normalizeVehicleNo(v.no); if(!v.pin) v.pin='1234'; if(!v.mobile) v.mobile=''; v.mobile=String(v.mobile||'').replace(/\D/g,'');});
+ db.vehicles.forEach(v=>{v.no=normalizeVehicleNo(v.no); if(v.pin===undefined) v.pin=''; if(!v.mobile) v.mobile=''; v.mobile=String(v.mobile||'').replace(/\D/g,'');});
  localStorage.setItem(KEY,JSON.stringify(db));
 }
 function restoreSession(){
@@ -183,7 +260,7 @@ function restoreSession(){
    if(x.role==='admin') session={role:'admin',user:null};
    else if(x.role==='driver') { const v=db.vehicles.find(v=>v.id===x.userId); if(v) session={role:'driver',user:v}; else return logout(); }
    else if(x.role==='customer') { const c=db.customers.find(c=>c.id===x.userId); if(c) session={role:'customer',user:c}; else return logout(); }
-   showApp(); render();
+   window.__lastDbStorage=localStorage.getItem(KEY)||''; showApp(); render(); startAutoRefresh();
  }catch(_){localStorage.removeItem(SESSION_KEY)}
 }
 function setNav(items,active){document.getElementById('nav').innerHTML=items.map(x=>`<button class="${active===x[0]?'active':''}" onclick="page('${x[0]}')">${x[1]}</button>`).join('')}
@@ -267,7 +344,7 @@ function vehicleTable(){
    <label>Search Vehicle</label>
    <input id="vehicleSearch" value="${esc(document.getElementById('vehicleSearch')?.value||'')}" oninput="vehicleSearchChanged()" placeholder="Search vehicle, e.g. 1051">
  </div>
- <div class="muted" style="font-size:12px;margin:-5px 0 10px">Driver login number = last 4 digits. Example: <b>MH12YQ1051 → 1051</b>. Driver PIN identifies the correct vehicle.</div>
+ <div class="muted" style="font-size:12px;margin:-5px 0 10px">Driver Login = last 4 digits. Example: <b>MH12YQ1051 → 1051</b>. The PIN identifies the driver/vehicle.</div>
  <div class="table-wrap"><table class="table"><tr><th>Transport Name</th><th>Vehicle Number</th><th>Driver Login</th><th>Driver</th><th>Assigned</th><th>Out</th><th>Return</th><th>Current</th><th>Action</th></tr>${list.map(v=>{let x=totalsVehicle(v);return `<tr><td><b>${esc(v.transport||'Warana Transport')}</b></td><td><b>${esc(v.no)}</b></td><td><span class="pill">${esc(vehicleLoginNo(v.no))}</span></td><td>${esc(v.driver)}</td><td>${v.assigned}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.current}</b></td><td><div class="actions"><button class="primary" onclick="addCratesModal(${v.id})">+ Crates</button><button class="secondary" onclick="vehicleModal(db.vehicles.find(x=>x.id===${v.id}))">Edit</button><button class="danger" onclick="deleteVehicle(${v.id})">Delete</button></div></td></tr>`}).join('')||'<tr><td colspan="9" class="empty">No matching vehicles</td></tr>'}</table></div>`;
 }
 function vehicleSearchChanged(){
@@ -494,7 +571,8 @@ function driverPage(p){
 }
 function driverDashboard(v){
  let x=totalsVehicle(v), rows=db.customers.map(c=>({c,x:customerTotals(c,v.id)})).filter(z=>z.x.out||z.x.ret);
- document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)}</h2><div class="grid">
+ document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)}</h2>
+ <div class="muted" style="font-size:12px;margin:-8px 0 14px">Use 🔄 Refresh to update data without logging in again.</div><div class="grid">
  <div class="card stat"><div class="muted">Total Assigned</div><div class="num">${v.assigned}</div></div><div class="card stat"><div class="muted">Total Out</div><div class="num">${x.out}</div></div><div class="card stat"><div class="muted">Returned</div><div class="num">${x.ret}</div></div><div class="card stat"><div class="muted">Current In Vehicle</div><div class="num">${x.current}</div></div></div>
  <div class="section actions"><button class="primary" onclick="txModal('out',${v.id})">📤 CRATE OUT</button><button class="secondary" onclick="txModal('return',${v.id})">📥 CRATE RETURN</button><button class="gray" onclick="changeDriverPinModal(${v.id})">🔐 Change PIN</button></div>
  <div class="section card"><h3>Customer-wise Crate Account</h3>${customerTable(v.id)}</div>`;
@@ -502,7 +580,8 @@ function driverDashboard(v){
 function customerTable(vehicleId){
  return `<div class="table-wrap"><table class="table"><tr><th>Customer</th><th>Given</th><th>Returned</th><th>Pending</th></tr>${db.customers.map(c=>{let x=customerTotals(c,vehicleId);return `<tr><td>${esc(c.name)}</td><td>${x.out}</td><td>${x.ret}</td><td><b>${x.pending}</b></td></tr>`}).join('')}</table></div>`;
 }
-function driverCustomers(v){document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)}</h2><div class="muted" style="margin:-8px 0 14px">Driver: ${esc(v.driver)}</div><div class="card">${customerTable(v.id)}</div>`}
+function driverCustomers(v){document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)}</h2>
+ <div class="muted" style="font-size:12px;margin:-8px 0 14px">Use 🔄 Refresh to update data without logging in again.</div><div class="muted" style="margin:-8px 0 14px">Driver: ${esc(v.driver)}</div><div class="card">${customerTable(v.id)}</div>`}
 function driverHistory(v){
  let rows=db.tx.filter(t=>t.vehicleId===v.id).reverse();document.getElementById('content').innerHTML=`<h2>${esc(v.transport||'Warana Transport')} - ${esc(v.no)} History</h2><div class="card table-wrap"><table class="table"><tr><th>Date/Time</th><th>Customer</th><th>Type</th><th>Qty</th></tr>${rows.map(t=>`<tr><td>${new Date(t.time).toLocaleString()}</td><td>${esc(db.customers.find(c=>c.id===t.customerId)?.name||'-')}</td><td>${t.type.toUpperCase()}</td><td>${t.qty}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No transactions</td></tr>'}</table></div>`;
 }
@@ -585,7 +664,7 @@ function customerPage(p){
  let c=session.user;setNav([['customer','👤 My Crates'],['history','📜 History']],p);if(p==='customer') customerDashboard(c);else customerHistory(c);
 }
 function customerDashboard(c){
- let x=customerTotals(c);document.getElementById('content').innerHTML=`<h2>${esc(c.name)}</h2><div class="muted" style="margin:-8px 0 14px">Customer Crate Account</div><div class="grid"><div class="card stat"><div class="muted">Total Crates Received</div><div class="num">${x.out}</div></div><div class="card stat"><div class="muted">Total Returned</div><div class="num">${x.ret}</div></div><div class="card stat"><div class="muted">Pending Crates</div><div class="num">${x.pending}</div></div><div class="card stat"><div class="muted">Account Status</div><div class="num" style="font-size:20px">${x.pending?'Pending':'Clear'}</div></div></div><div class="section card"><h3>Vehicle-wise Received / Pending</h3><div class="table-wrap"><table class="table"><tr><th>Transport Name</th><th>Vehicle Number</th><th>Driver</th><th>Received</th><th>Returned</th><th>Pending</th></tr>${db.vehicles.map(v=>{let z=customerTotals(c,v.id);return `<tr><td>${esc(v.transport||'Warana Transport')}</td><td>${esc(v.no)}</td><td>${esc(v.driver)}</td><td>${z.out}</td><td>${z.ret}</td><td><b>${z.pending}</b></td></tr>`}).join('')}</table></div></div>`;
+ let x=customerTotals(c);document.getElementById('content').innerHTML=`<h2>${esc(c.name)}</h2><div class="muted" style="margin:-8px 0 14px">Customer Crate Account • Use 🔄 Refresh to update without logging in again.</div><div class="grid"><div class="card stat"><div class="muted">Total Crates Received</div><div class="num">${x.out}</div></div><div class="card stat"><div class="muted">Total Returned</div><div class="num">${x.ret}</div></div><div class="card stat"><div class="muted">Pending Crates</div><div class="num">${x.pending}</div></div><div class="card stat"><div class="muted">Account Status</div><div class="num" style="font-size:20px">${x.pending?'Pending':'Clear'}</div></div></div><div class="section card"><h3>Vehicle-wise Received / Pending</h3><div class="table-wrap"><table class="table"><tr><th>Transport Name</th><th>Vehicle Number</th><th>Driver</th><th>Received</th><th>Returned</th><th>Pending</th></tr>${db.vehicles.map(v=>{let z=customerTotals(c,v.id);return `<tr><td>${esc(v.transport||'Warana Transport')}</td><td>${esc(v.no)}</td><td>${esc(v.driver)}</td><td>${z.out}</td><td>${z.ret}</td><td><b>${z.pending}</b></td></tr>`}).join('')}</table></div></div>`;
 }
 function customerHistory(c){
  let rows=db.tx.filter(t=>t.customerId===c.id).reverse();document.getElementById('content').innerHTML=`<h2>My Crate History</h2><div class="card table-wrap"><table class="table"><tr><th>Date/Time</th><th>Transport Name</th><th>Vehicle Number</th><th>Driver</th><th>Type</th><th>Qty</th></tr>${rows.map(t=>{let v=db.vehicles.find(v=>v.id===t.vehicleId);return `<tr><td>${new Date(t.time).toLocaleString()}</td><td>${esc(v?.transport||'Warana Transport')}</td><td>${esc(v?.no||'-')}</td><td>${esc(v?.driver||'-')}</td><td>${t.type.toUpperCase()}</td><td>${t.qty}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No history</td></tr>'||'<tr><td colspan="5" class="empty">No history</td></tr>'}</table></div>`;
